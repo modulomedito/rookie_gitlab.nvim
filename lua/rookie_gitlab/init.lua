@@ -1,5 +1,6 @@
 local keymaps = require("rookie_gitlab.keymaps")
 local commands = require("rookie_gitlab.commands")
+local highlights = require("rookie_gitlab.highlights")
 
 local M = {}
 
@@ -141,7 +142,7 @@ render_projects = function()
             end)
         end
 
-        local lines = { "=== GitLab Projects ===" }
+        local lines = { "=== GitLab Projects === (Press g? toggle help menu)" }
         if state.filter_text ~= "" then
             table.insert(lines, "Filter: " .. state.filter_text)
         end
@@ -161,6 +162,7 @@ render_projects = function()
         end
 
         set_lines(lines)
+        highlights.apply(state.buf, "projects")
     end, 10)
 end
 
@@ -176,7 +178,7 @@ render_issues = function(project_id)
         end
 
         local issues = state.issues[project_id]
-        local lines = { "=== Issues (Project " .. project_id .. ") ===" }
+        local lines = { "=== Issues (Project " .. project_id .. ") === (Press g? toggle help menu)" }
         if state.filter_text ~= "" then
             table.insert(lines, "Filter: " .. state.filter_text)
         end
@@ -225,6 +227,7 @@ render_issues = function(project_id)
         end
 
         set_lines(lines)
+        highlights.apply(state.buf, "issues")
     end, 10)
 end
 
@@ -297,6 +300,7 @@ render_issue_detail = function(issue_iid)
         end
 
         set_lines(lines)
+        highlights.clear(state.buf)
         if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
             vim.bo[state.buf].filetype = "markdown"
         end
@@ -425,6 +429,7 @@ function M.toggle_help()
             "Press g?, <BS>, or <C-o> to return to the previous view.",
         }
         set_lines(lines)
+        highlights.clear(state.buf)
     end
 end
 
@@ -852,6 +857,7 @@ function M.edit_issue()
 end
 
 function M.setup()
+    highlights.setup()
     keymaps.setup()
     commands.setup()
 end
