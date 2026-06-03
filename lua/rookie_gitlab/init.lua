@@ -8,21 +8,50 @@ local M = {}
 vim.g.gitlab_url = vim.g.gitlab_url or "https://gitlab.com"
 vim.g.gitlab_token = vim.g.gitlab_token or ""
 
+local function new_state(cwd)
+    return {
+        projects = nil,
+        issues = {},
+        current_view = "projects",
+        previous_view = nil,
+        forward_view = nil,
+        selected_project = nil,
+        selected_issue = nil,
+        filter_text = "",
+        quick_filter_active = false,
+        quick_filter_pattern = "",
+        buf = nil,
+        win = nil,
+        cwd = cwd or vim.fn.getcwd(),
+    }
+end
+
 -- State Management
-local state = {
-    projects = nil,
-    issues = {},
-    current_view = "projects",
-    previous_view = nil,
-    forward_view = nil,
-    selected_project = nil,
-    selected_issue = nil,
-    filter_text = "",
-    quick_filter_active = false,
-    quick_filter_pattern = "",
-    buf = nil,
-    win = nil,
-}
+local state = new_state()
+
+local function reset_state(opts)
+    opts = opts or {}
+
+    if state.win and vim.api.nvim_win_is_valid(state.win) then
+        pcall(vim.api.nvim_win_close, state.win, true)
+    end
+
+    if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
+        highlights.clear(state.buf)
+        if opts.wipe_buffer then
+            pcall(vim.api.nvim_buf_delete, state.buf, { force = true })
+        end
+    end
+
+    state = new_state(opts.cwd)
+end
+
+local function ensure_current_cwd()
+    local cwd = vim.fn.getcwd()
+    if state.cwd ~= cwd then
+        reset_state({ cwd = cwd, wipe_buffer = true })
+    end
+end
 
 -- Make API request using curl
 local function make_request(endpoint, method, payload)
@@ -81,6 +110,8 @@ local render_issue_detail
 
 -- Create or focus the UI buffer
 local function create_ui_buffer()
+    ensure_current_cwd()
+
     if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
         if state.win and vim.api.nvim_win_is_valid(state.win) then
             vim.api.nvim_set_current_win(state.win)
@@ -315,11 +346,13 @@ function M.close()
 end
 
 function M.open()
+    ensure_current_cwd()
     create_ui_buffer()
     render_projects()
 end
 
 function M.toggle()
+    ensure_current_cwd()
     if state.win and vim.api.nvim_win_is_valid(state.win) then
         vim.api.nvim_win_close(state.win, true)
         state.win = nil
@@ -330,6 +363,10 @@ function M.toggle()
             render_projects()
         end
     end
+end
+
+function M.reset()
+    reset_state({ cwd = vim.fn.getcwd(), wipe_buffer = true })
 end
 
 function M.refresh()
@@ -860,6 +897,15 @@ function M.setup()
     highlights.setup()
     keymaps.setup()
     commands.setup()
+
+    vim.api.nvim_create_augroup("RkGitlab", { clear = true })
+    vim.api.nvim_create_autocmd("DirChanged", {
+        group = "RkGitlab",
+        callback = function()
+            reset_state({ cwd = vim.fn.getcwd(), wipe_buffer = true })
+        end,
+        desc = "Reset rookie_gitlab state when cwd changes",
+    })
 end
 
 return M
