@@ -83,7 +83,7 @@ local function highlight_issue_line(buf, line_idx, line)
         local state = meta:sub(1, at_pos - 1)
         local state_start = meta_start + 1
         local state_end = meta_start + at_pos - 1
-        local at_col = meta_start + at_pos - 1
+        local at_col = meta_start + at_pos
         local assignee_start = meta_start + at_pos + 1
         local assignee_end = meta_end - 1
 
@@ -139,8 +139,8 @@ function M.setup()
     vim.api.nvim_set_hl(0, "RkGitlabProjectName", { default = true, link = "Directory" })
     vim.api.nvim_set_hl(0, "RkGitlabIssueId", { default = true, link = "Number" })
     vim.api.nvim_set_hl(0, "RkGitlabIssueState", { default = true, link = "Keyword" })
-    vim.api.nvim_set_hl(0, "RkGitlabIssueStateOpened", { default = true, fg = "#ff5f5f", bold = true })
-    vim.api.nvim_set_hl(0, "RkGitlabIssueStateClosed", { default = true, fg = "#5fff87", bold = true })
+    vim.api.nvim_set_hl(0, "RkGitlabIssueStateOpened", { default = true, fg = "#f7768e", bold = true })
+    vim.api.nvim_set_hl(0, "RkGitlabIssueStateClosed", { default = true, fg = "#9ece6a", bold = true })
     vim.api.nvim_set_hl(0, "RkGitlabAssignee", { default = true, link = "Identifier" })
     vim.api.nvim_set_hl(0, "RkGitlabIssueTitle", { default = true, link = "Normal" })
     vim.api.nvim_set_hl(0, "RkGitlabDelimiter", { default = true, link = "Delimiter" })
