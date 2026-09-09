@@ -15,7 +15,7 @@ function M.setup_ui_buffer(buf)
     vim.api.nvim_buf_set_keymap(buf, "n", "M", "<cmd>lua require('rookie_gitlab').toggle_quick_filter()<CR>", opts)
     vim.api.nvim_buf_set_keymap(buf, "n", "<BS>", "<cmd>lua require('rookie_gitlab').go_back()<CR>", opts)
     vim.api.nvim_buf_set_keymap(buf, "n", "<C-o>", "<cmd>lua require('rookie_gitlab').go_back()<CR>", opts)
-    vim.api.nvim_buf_set_keymap(buf, "n", "<C-q>", "<cmd>lua require('rookie_gitlab').go_back()<CR>", opts)
+    vim.api.nvim_buf_set_keymap(buf, "n", "<C-q>", "<cmd>lua require('rookie_gitlab').close_or_go_back()<CR>", opts)
     vim.api.nvim_buf_set_keymap(buf, "n", "<C-i>", "<cmd>lua require('rookie_gitlab').go_forward()<CR>", opts)
     vim.api.nvim_buf_set_keymap(buf, "n", "g?", "<cmd>lua require('rookie_gitlab').toggle_help()<CR>", opts)
 end

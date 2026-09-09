@@ -501,6 +501,15 @@ function M.toggle_quick_filter()
     end
 end
 
+-- `<C-q>`: back one view level; at the root projects view, close the window
+function M.close_or_go_back()
+    if state.current_view == "projects" then
+        M.close()
+    else
+        M.go_back()
+    end
+end
+
 function M.go_back()
     if state.current_view == "help" then
         M.toggle_help()
@@ -549,7 +558,7 @@ function M.toggle_help()
             "",
             "  <CR>       : Open Project / View Issue Details",
             "  <BS>/<C-o> : Go back",
-            "  <C-q>      : Go back (issue detail to issue list)",
+            "  <C-q>      : Go back one level, close at root (projects)",
             "  <C-i>      : Go forward",
             "  /          : Search / Filter Issues",
             "  M          : Toggle quick filter for [state@assignee]",
