@@ -1007,8 +1007,9 @@ function M.add_issue(edit_iid)
     end
 end
 
--- Open a floating buffer to rewrite `body`. `s` stages a submit, `q` or
--- `ZZ` submits (or aborts when empty/unchanged). Keeps `:w` working too.
+-- Open a floating buffer to rewrite `body`. `<C-s>` (or `:w`) saves in
+-- place, `<C-q>` submits the saved body and closes. Editing with no
+-- `<C-s>`/`:w` first still submits on `<C-q>`.
 local function edit_body_flow(orig_body, title, submit)
     local buf = vim.api.nvim_create_buf(false, true)
     vim.bo[buf].buftype = "acwrite"
@@ -1024,40 +1025,26 @@ local function edit_body_flow(orig_body, title, submit)
     end
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, prefill)
 
-    local submitted_body = nil
+    local saved_body = nil
 
-    local function stage_from_buffer(announce)
+    local function get_body()
         local body = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
-        body = body:gsub("^%s+", ""):gsub("%s+$", "")
-
-        if body == "" or body == original then
-            submitted_body = nil
-            vim.notify("[RkGitlab] Edit unchanged or empty.", vim.log.levels.WARN)
-        else
-            submitted_body = body
-            if announce then
-                vim.notify("[RkGitlab] Edit saved. Press q to submit.", vim.log.levels.INFO)
-            end
-        end
-        vim.bo[buf].modified = false
+        return body:gsub("^%s+", ""):gsub("%s+$", "")
     end
 
-    vim.api.nvim_create_autocmd("BufWriteCmd", {
-        buffer = buf,
-        callback = function()
-            stage_from_buffer(true)
-        end,
-    })
+    local function save_edit(announce)
+        local body = get_body()
+        if body == "" or body == original then
+            vim.notify("[RkGitlab] Edit unchanged or empty.", vim.log.levels.WARN)
+            return
+        end
 
-    -- BufDelete (user quits buffer directly, e.g. `:bdelete`) still submits
-    vim.api.nvim_create_autocmd("BufDelete", {
-        buffer = buf,
-        callback = function()
-            if submitted_body and submitted_body ~= "" then
-                submit(submitted_body)
-            end
-        end,
-    })
+        saved_body = body
+        vim.bo[buf].modified = false
+        if announce then
+            vim.notify("[RkGitlab] Edit saved. Press <C-q> to submit.", vim.log.levels.INFO)
+        end
+    end
 
     local width = math.floor(vim.o.columns * 0.6)
     local height = math.floor(vim.o.lines * 0.6)
@@ -1076,52 +1063,44 @@ local function edit_body_flow(orig_body, title, submit)
         title_pos = "center",
     })
 
-    vim.api.nvim_buf_set_keymap(buf, "n", "s", "", {
-        noremap = true,
-        silent = true,
-        callback = function()
-            stage_from_buffer(true)
-        end,
-    })
+    -- `<C-s>` / `<C-q>` work from normal and insert mode
+    for _, mode in ipairs({ "n", "i" }) do
+        vim.api.nvim_buf_set_keymap(buf, mode, "<C-s>", "", {
+            noremap = true,
+            silent = true,
+            callback = function()
+                save_edit(true)
+            end,
+        })
+        vim.api.nvim_buf_set_keymap(buf, mode, "<C-q>", "", {
+            noremap = true,
+            silent = true,
+            callback = function()
+                if not vim.api.nvim_win_is_valid(win) then
+                    return
+                end
 
-    local function close_submit()
-        if not vim.api.nvim_win_is_valid(win) then
-            return
-        end
+                save_edit(false)
 
-        stage_from_buffer(false)
+                local body = saved_body
+                saved_body = nil
 
-        local body = submitted_body
-        submitted_body = nil
-        pcall(vim.api.nvim_win_close, win, true) -- wipe fires BufDelete; nothing staged
-
-        if body then
-            submit(body)
-        else
-            vim.notify("[RkGitlab] Edit aborted.", vim.log.levels.INFO)
-        end
+                if body then
+                    submit(body)
+                    pcall(vim.api.nvim_win_close, win, true)
+                else
+                    vim.notify("[RkGitlab] Edit aborted. Nothing submitted.", vim.log.levels.INFO)
+                end
+            end,
+        })
     end
 
-    vim.api.nvim_buf_set_keymap(buf, "n", "q", "", {
-        noremap = true,
-        silent = true,
-        callback = close_submit,
-    })
-
-    vim.api.nvim_buf_set_keymap(buf, "n", "ZZ", "", {
-        noremap = true,
-        silent = true,
-        callback = close_submit,
-    })
-
-    -- `:w`-based submit (BufWriteCmd stages, then buffer wipe submits)
-    vim.api.nvim_buf_set_keymap(buf, "n", "<C-s>", "", {
-        noremap = true,
-        silent = true,
+    -- Fallback: `:w` also saves; plain quit without `<C-q>` does not submit
+    vim.api.nvim_create_autocmd("BufWriteCmd", {
+        buffer = buf,
         callback = function()
-            vim.api.nvim_buf_call(buf, function()
-                vim.cmd("write")
-            end)
+            save_edit(true)
+            vim.bo[buf].modified = false
         end,
     })
 
@@ -1151,8 +1130,10 @@ function M.edit_issue_detail()
         end
 
         local orig_body = issue.description or ""
-        local title =
-            string.format(" Issue #%d description (:w save, close window to submit) ", issue_iid)
+        local title = string.format(
+            " Issue #%d description (<C-s> or :w to save, <C-q> close and submit) ",
+            issue_iid
+        )
         edit_body_flow(orig_body, title, function(new_body)
             local res = make_request(
                 string.format("/projects/%d/issues/%d", project_id, issue_iid),
@@ -1192,8 +1173,10 @@ function M.edit_issue_detail()
         end
 
         local orig_body = matched.body or ""
-        local title =
-            string.format(" Comment by %s (:w save, close window to submit) ", comment_author)
+        local title = string.format(
+            " Comment by %s (<C-s> or :w to save, <C-q> close and submit) ",
+            comment_author
+        )
         edit_body_flow(orig_body, title, function(new_body)
             local res = make_request(
                 string.format("/projects/%d/issues/%d/notes/%d", project_id, issue_iid, matched.id),
