@@ -549,6 +549,7 @@ function M.toggle_help()
             "",
             "  <CR>       : Open Project / View Issue Details",
             "  <BS>/<C-o> : Go back",
+            "  <C-q>      : Go back (issue detail to issue list)",
             "  <C-i>      : Go forward",
             "  /          : Search / Filter Issues",
             "  M          : Toggle quick filter for [state@assignee]",
