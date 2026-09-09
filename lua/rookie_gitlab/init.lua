@@ -115,6 +115,7 @@ end
 local render_projects
 local render_issues
 local render_issue_detail
+local edit_body_flow
 
 -- Create or focus the UI buffer
 local function create_ui_buffer()
@@ -509,7 +510,7 @@ function M.toggle_help()
             "  :RkGitlab open    : [When issue list]   Switch the issue state as 'open'",
             "  :RkGitlab close   : [When issue list]   Switch the issue state as 'close'",
             "  :RkGitlab toggle  : [When issue list]   Toggle the issue state",
-            "  :RkGitlab comment : [When issue detail] Add a comment to the issue",
+            "  :RkGitlab comment : [When issue detail] Comment the issue / reply on a comment heading",
             "  :RkGitlab edit    : [When issue list]   Edit issue description",
             "  :RkGitlab edit    : [When issue detail] Edit 'description' when hover on heading",
             "  :RkGitlab edit    : [When issue detail] Edit 'comment' when hover on heading",
@@ -590,6 +591,29 @@ function M.open_issue()
     end
 end
 
+-- Resolve a `### Author (created_at)` heading under the cursor to the note
+-- it was rendered from. Returns the note plus the parsed author and date,
+-- or just the parsed values when the note is no longer in state.detail_notes.
+local function find_heading_note(line)
+    local author, created_at =
+        line:match("^### (.+) %((%d+-%d+-%d+T%d+:%d+:%d+%.%d+Z)%)")
+    if not author then
+        return nil
+    end
+
+    for _, note in ipairs(state.detail_notes) do
+        if
+            note.author
+            and note.author.name == author
+            and note.created_at == created_at
+        then
+            return note, author, created_at
+        end
+    end
+
+    return nil, author, created_at
+end
+
 function M.comment_issue()
     if
         state.current_view ~= "issue_detail"
@@ -602,6 +626,79 @@ function M.comment_issue()
 
     local project_id = state.selected_project
     local issue_iid = state.selected_issue
+
+    -- On a comment heading, reply to that comment's thread instead of
+    -- commenting on the issue. GitLab has no nested comments; a reply is a
+    -- new note added to the discussion the comment belongs to.
+    local reply_note, reply_author =
+        find_heading_note(vim.api.nvim_get_current_line())
+    if reply_author then
+        if not reply_note then
+            vim.notify(
+                "[RkGitlab] Comment not found, refresh the view and retry",
+                vim.log.levels.WARN
+            )
+            return
+        end
+
+        local discussions = make_request(
+            string.format(
+                "/projects/%d/issues/%d/discussions",
+                project_id,
+                issue_iid
+            )
+        )
+        local discussion_id = nil
+        if type(discussions) == "table" then
+            for _, discussion in ipairs(discussions) do
+                if type(discussion.notes) == "table" then
+                    for _, note in ipairs(discussion.notes) do
+                        if note and note.id == reply_note.id then
+                            discussion_id = discussion.id
+                            break
+                        end
+                    end
+                end
+                if discussion_id then
+                    break
+                end
+            end
+        end
+        if not discussion_id then
+            vim.notify(
+                "[RkGitlab] Could not find the discussion for this comment, refresh and retry",
+                vim.log.levels.WARN
+            )
+            return
+        end
+
+        local title = string.format(
+            " Reply to %s (<C-s> or :w to save, <C-q> reply and close) ",
+            reply_author
+        )
+        edit_body_flow("", title, function(new_body)
+            local res = make_request(
+                string.format(
+                    "/projects/%d/issues/%d/discussions/%s/notes",
+                    project_id,
+                    issue_iid,
+                    discussion_id
+                ),
+                "POST",
+                { body = new_body }
+            )
+            if res then
+                vim.notify("[RkGitlab] Reply added to comment", vim.log.levels.INFO)
+                state.detail_notes = {}
+                vim.schedule(function()
+                    render_issue_detail(issue_iid)
+                end)
+            else
+                vim.notify("[RkGitlab] Failed to add reply", vim.log.levels.ERROR)
+            end
+        end)
+        return
+    end
 
     local buf = vim.api.nvim_create_buf(false, true)
     vim.bo[buf].buftype = "acwrite"
@@ -1010,7 +1107,7 @@ end
 -- Open a floating buffer to rewrite `body`. `<C-s>` (or `:w`) saves in
 -- place, `<C-q>` submits the saved body and closes. Editing with no
 -- `<C-s>`/`:w` first still submits on `<C-q>`.
-local function edit_body_flow(orig_body, title, submit)
+edit_body_flow = function(orig_body, title, submit)
     local buf = vim.api.nvim_create_buf(false, true)
     vim.bo[buf].buftype = "acwrite"
     vim.bo[buf].filetype = "markdown"
@@ -1120,7 +1217,7 @@ function M.edit_issue_detail()
     local issue_iid = state.selected_issue
 
     local description_str = line:match("^## Description")
-    local comment_author, comment_time = line:match("^### (.+) %((%d+-%d+-%d+T%d+:%d+:%d+%.%d+Z)%)")
+    local matched, comment_author = find_heading_note(line)
 
     if description_str then
         -- Modify the issue description
@@ -1151,27 +1248,8 @@ function M.edit_issue_detail()
                 vim.notify("[RkGitlab] Failed to update issue description", vim.log.levels.ERROR)
             end
         end)
-    elseif comment_author and comment_time then
+    elseif matched then
         -- Modify the comment whose heading is under the cursor
-        local matched = nil
-        for _, note in ipairs(state.detail_notes) do
-            if
-                note.author
-                and note.author.name == comment_author
-                and note.created_at == comment_time
-            then
-                matched = note
-                break
-            end
-        end
-        if not matched then
-            vim.notify(
-                "[RkGitlab] Comment not found, refresh the view and retry",
-                vim.log.levels.WARN
-            )
-            return
-        end
-
         local orig_body = matched.body or ""
         local title = string.format(
             " Comment by %s (<C-s> or :w to save, <C-q> close and submit) ",
@@ -1193,6 +1271,12 @@ function M.edit_issue_detail()
                 vim.notify("[RkGitlab] Failed to update comment", vim.log.levels.ERROR)
             end
         end)
+    elseif comment_author then
+        vim.notify(
+            "[RkGitlab] Comment not found, refresh the view and retry",
+            vim.log.levels.WARN
+        )
+        return
     else
         vim.notify(
             "[RkGitlab] Please place 'description' or 'comment' heading under cursor",
