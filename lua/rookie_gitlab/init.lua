@@ -1127,8 +1127,12 @@ function M.add_issue(edit_iid)
             vim.notify("[RkGitlab] Issue " .. action_str .. " aborted.", vim.log.levels.INFO)
         end
 
+        -- Refocus the UI window, or reopen it when it was closed while the
+        -- form was open (e.g. focus-loss autocmds from user config)
         if state.win and vim.api.nvim_win_is_valid(state.win) then
             pcall(vim.api.nvim_set_current_win, state.win)
+        elseif state.buf and vim.api.nvim_buf_is_valid(state.buf) then
+            create_ui_buffer()
         end
     end
 
