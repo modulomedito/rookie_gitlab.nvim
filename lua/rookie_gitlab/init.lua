@@ -18,6 +18,7 @@ local function new_state(cwd)
         selected_project = nil,
         selected_issue = nil,
         detail_notes = {},
+        note_depths = {},
         filter_text = "",
         quick_filter_active = false,
         quick_filter_pattern = "",
@@ -344,10 +345,12 @@ render_issue_detail = function(issue_iid)
         table.insert(lines, "")
         table.insert(lines, "## Comments")
 
-        -- Threaded render: notes of one discussion render in order under
-        -- each other; the first starts at `###` and each reply one level
-        -- deeper, capped at `######`. Falls back to the flat `###` list
-        -- when the discussions call fails.
+        -- Threaded render: the first note of a discussion is its root at
+        -- `###`. GitLab threads are flat (no per-note parent), so replies
+        -- made outside this plugin get `####`, while replies created here
+        -- carry their target's depth from state.note_depths and nest one
+        -- level deeper. Capped at `######`. Falls back to the flat `###`
+        -- list when the discussions call fails.
         local function render_comment(note, heading)
             table.insert(
                 lines,
@@ -382,12 +385,19 @@ render_issue_detail = function(issue_iid)
             if type(discussions) == "table" and #discussions > 0 then
                 for _, discussion in ipairs(discussions) do
                     if type(discussion.notes) == "table" then
-                        local ordinal = 0
+                        local is_root = true
                         for _, note in ipairs(discussion.notes) do
                             if not note.system then
-                                ordinal = ordinal + 1
+                                local depth = 3
+                                if not is_root then
+                                    depth = state.note_depths[note.id] or 4
+                                end
+                                is_root = false
                                 comments = comments + 1
-                                render_comment(note, string.rep("#", math.min(2 + ordinal, 6)) .. " ")
+                                render_comment(
+                                    note,
+                                    string.rep("#", math.min(depth, 6)) .. " "
+                                )
                             end
                         end
                     end
@@ -670,9 +680,10 @@ function M.comment_issue()
     -- On a comment heading, reply to that comment's thread instead of
     -- commenting on the issue. GitLab has no nested comments; a reply is a
     -- new note added to the discussion the comment belongs to.
-    local reply_note, reply_author =
-        find_heading_note(vim.api.nvim_get_current_line())
+    local heading_line = vim.api.nvim_get_current_line()
+    local reply_note, reply_author = find_heading_note(heading_line)
     if reply_author then
+        local target_depth = #(heading_line:match("^#+"))
         if not reply_note then
             vim.notify(
                 "[RkGitlab] Comment not found, refresh the view and retry",
@@ -729,6 +740,9 @@ function M.comment_issue()
             )
             if res then
                 vim.notify("[RkGitlab] Reply added to comment", vim.log.levels.INFO)
+                if res.id then
+                    state.note_depths[res.id] = math.min(target_depth + 1, 6)
+                end
                 state.detail_notes = {}
                 vim.schedule(function()
                     render_issue_detail(issue_iid)
