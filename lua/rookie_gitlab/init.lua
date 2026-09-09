@@ -343,21 +343,61 @@ render_issue_detail = function(issue_iid)
 
         table.insert(lines, "")
         table.insert(lines, "## Comments")
-        if notes and #notes > 0 then
+
+        -- Threaded render: notes of one discussion render in order under
+        -- each other; the first starts at `###` and each reply one level
+        -- deeper, capped at `######`. Falls back to the flat `###` list
+        -- when the discussions call fails.
+        local function render_comment(note, heading)
+            table.insert(
+                lines,
+                heading .. note.author.name .. " (" .. note.created_at .. ")"
+            )
+            for s in note.body:gmatch("[^\r\n]+") do
+                table.insert(lines, s)
+            end
+            table.insert(lines, "")
+        end
+
+        local comments = 0
+        local function render_notes_flat()
             for _, note in ipairs(notes) do
                 if not note.system then
-                    table.insert(
-                        lines,
-                        "### " .. note.author.name .. " (" .. note.created_at .. ")"
-                    )
-                    for s in note.body:gmatch("[^\r\n]+") do
-                        table.insert(lines, s)
-                    end
-                    table.insert(lines, "")
+                    comments = comments + 1
+                    render_comment(note, "### ")
                 end
             end
-        else
+        end
+
+        if not notes or #notes == 0 then
             table.insert(lines, "*No comments.*")
+        else
+            local discussions = make_request(
+                string.format(
+                    "/projects/%d/issues/%d/discussions",
+                    project_id,
+                    issue_iid
+                )
+            )
+            if type(discussions) == "table" and #discussions > 0 then
+                for _, discussion in ipairs(discussions) do
+                    if type(discussion.notes) == "table" then
+                        local ordinal = 0
+                        for _, note in ipairs(discussion.notes) do
+                            if not note.system then
+                                ordinal = ordinal + 1
+                                comments = comments + 1
+                                render_comment(note, string.rep("#", math.min(2 + ordinal, 6)) .. " ")
+                            end
+                        end
+                    end
+                end
+            else
+                render_notes_flat()
+            end
+            if comments == 0 then
+                table.insert(lines, "*No comments.*")
+            end
         end
 
         set_lines(lines)
@@ -591,12 +631,12 @@ function M.open_issue()
     end
 end
 
--- Resolve a `### Author (created_at)` heading under the cursor to the note
--- it was rendered from. Returns the note plus the parsed author and date,
--- or just the parsed values when the note is no longer in state.detail_notes.
+-- Resolve a comment heading (`###`..`######`, author and created_at) under
+-- the cursor to the note it was rendered from. Returns the note plus the
+-- parsed values, or just the parsed values when the note is stale.
 local function find_heading_note(line)
     local author, created_at =
-        line:match("^### (.+) %((%d+-%d+-%d+T%d+:%d+:%d+%.%d+Z)%)")
+        line:match("^#{3,6} (.+) %((%d+-%d+-%d+T%d+:%d+:%d+%.%d+Z)%)")
     if not author then
         return nil
     end
