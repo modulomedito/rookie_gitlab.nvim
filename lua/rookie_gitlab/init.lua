@@ -56,14 +56,18 @@ end
 -- Make API request using curl
 local function make_request(endpoint, method, payload)
     if vim.g.gitlab_token == nil or vim.g.gitlab_token == "" then
-        vim.notify("[RkGitlab] Token is not set. Please set vim.g.gitlab_token", vim.log.levels.ERROR)
+        vim.notify(
+            "[RkGitlab] Token is not set. Please set vim.g.gitlab_token",
+            vim.log.levels.ERROR
+        )
         return nil
     end
 
     local url = vim.g.gitlab_url .. "/api/v4" .. endpoint
     method = method or "GET"
 
-    local cmd = string.format('curl -s -X %s --header "PRIVATE-TOKEN: %s"', method, vim.g.gitlab_token)
+    local cmd =
+        string.format('curl -s -X %s --header "PRIVATE-TOKEN: %s"', method, vim.g.gitlab_token)
     local tmp_file = nil
 
     if payload then
@@ -72,7 +76,8 @@ local function make_request(endpoint, method, payload)
         if f then
             f:write(vim.fn.json_encode(payload))
             f:close()
-            cmd = cmd .. string.format(' --header "Content-Type: application/json" -d "@%s"', tmp_file)
+            cmd = cmd
+                .. string.format(' --header "Content-Type: application/json" -d "@%s"', tmp_file)
         end
     end
 
@@ -90,7 +95,9 @@ local function make_request(endpoint, method, payload)
 
     local success, data = pcall(vim.fn.json_decode, stdout)
     if not success then
-        if stdout == "" then return true end
+        if stdout == "" then
+            return true
+        end
         vim.notify("[RkGitlab] Failed to parse API response.", vim.log.levels.ERROR)
         return nil
     end
@@ -163,7 +170,9 @@ render_projects = function()
 
     vim.defer_fn(function()
         if not state.projects then
-            local data = make_request("/projects?membership=true&simple=true&order_by=updated_at&sort=desc&per_page=100")
+            local data = make_request(
+                "/projects?membership=true&simple=true&order_by=updated_at&sort=desc&per_page=100"
+            )
             state.projects = data or {}
 
             table.sort(state.projects, function(a, b)
@@ -209,7 +218,8 @@ render_issues = function(project_id)
         end
 
         local issues = state.issues[project_id]
-        local lines = { "=== Issues (Project " .. project_id .. ") === (Press g? toggle help menu)" }
+        local lines =
+            { "=== Issues (Project " .. project_id .. ") === (Press g? toggle help menu)" }
         if state.filter_text ~= "" then
             table.insert(lines, "Filter: " .. state.filter_text)
         end
@@ -233,7 +243,8 @@ render_issues = function(project_id)
                 table.insert(assignee_names, issue.assignee.name)
             end
 
-            local assignee_str = #assignee_names > 0 and table.concat(assignee_names, ", ") or "Unassigned"
+            local assignee_str = #assignee_names > 0 and table.concat(assignee_names, ", ")
+                or "Unassigned"
             local assignee_lower = assignee_str:lower()
 
             local quick_match_str = string.format("%s@%s", issue.state, assignee_str)
@@ -253,7 +264,16 @@ render_issues = function(project_id)
             end
 
             if match then
-                table.insert(lines, string.format("#%d [%s@%s] %s", issue.iid, issue.state, assignee_str, issue.title))
+                table.insert(
+                    lines,
+                    string.format(
+                        "#%d [%s@%s] %s",
+                        issue.iid,
+                        issue.state,
+                        assignee_str,
+                        issue.title
+                    )
+                )
             end
         end
 
@@ -275,12 +295,16 @@ render_issue_detail = function(issue_iid)
             return
         end
 
-        local notes = make_request(string.format("/projects/%d/issues/%d/notes", project_id, issue_iid))
+        local notes =
+            make_request(string.format("/projects/%d/issues/%d/notes", project_id, issue_iid))
 
         local lines = {}
         table.insert(lines, "# " .. issue.title)
         table.insert(lines, "**ID:** " .. issue.iid)
-        table.insert(lines, "**Author:** " .. (type(issue.author) == "table" and issue.author.name or "Unknown"))
+        table.insert(
+            lines,
+            "**Author:** " .. (type(issue.author) == "table" and issue.author.name or "Unknown")
+        )
         table.insert(lines, "**State:** " .. issue.state)
         table.insert(lines, "**Created:** " .. issue.created_at)
 
@@ -319,7 +343,10 @@ render_issue_detail = function(issue_iid)
         if notes and #notes > 0 then
             for _, note in ipairs(notes) do
                 if not note.system then
-                    table.insert(lines, "### " .. note.author.name .. " (" .. note.created_at .. ")")
+                    table.insert(
+                        lines,
+                        "### " .. note.author.name .. " (" .. note.created_at .. ")"
+                    )
                     for s in note.body:gmatch("[^\r\n]+") do
                         table.insert(lines, s)
                     end
@@ -381,7 +408,10 @@ end
 
 function M.search()
     if state.current_view ~= "issues" and state.current_view ~= "projects" then
-        vim.notify("[RkGitlab] Filtering is only available in projects or issues view", vim.log.levels.INFO)
+        vim.notify(
+            "[RkGitlab] Filtering is only available in projects or issues view",
+            vim.log.levels.INFO
+        )
         return
     end
     local prompt = state.current_view == "projects" and "Filter Projects: " or "Filter Issues: "
@@ -398,7 +428,9 @@ function M.search()
 end
 
 function M.toggle_quick_filter()
-    if state.current_view ~= "issues" then return end
+    if state.current_view ~= "issues" then
+        return
+    end
 
     if state.quick_filter_active then
         state.quick_filter_active = false
@@ -433,9 +465,17 @@ function M.go_back()
 end
 
 function M.go_forward()
-    if state.current_view == "projects" and state.forward_view == "issues" and state.selected_project then
+    if
+        state.current_view == "projects"
+        and state.forward_view == "issues"
+        and state.selected_project
+    then
         render_issues(state.selected_project)
-    elseif state.current_view == "issues" and state.forward_view == "issue_detail" and state.selected_issue then
+    elseif
+        state.current_view == "issues"
+        and state.forward_view == "issue_detail"
+        and state.selected_issue
+    then
         render_issue_detail(state.selected_issue)
     end
 end
@@ -454,14 +494,20 @@ function M.toggle_help()
         local lines = {
             "=== RkGitlab Keymaps ===",
             "",
-            "  <CR>      : Open Project / View Issue Details",
-            "  <BS>/<C-o>: Go back",
-            "  <C-i>     : Go forward",
-            "  /         : Search / Filter Issues",
-            "  M         : Toggle quick filter for [state@assignee]",
-            "  r         : Refresh current view",
-            "  q         : Close window",
-            "  g?        : Toggle this help menu",
+            "  <CR>       : Open Project / View Issue Details",
+            "  <BS>/<C-o> : Go back",
+            "  <C-i>      : Go forward",
+            "  /          : Search / Filter Issues",
+            "  M          : Toggle quick filter for [state@assignee]",
+            "  r          : Refresh current view",
+            "  q          : Close window",
+            "  g?         : Toggle this help menu",
+            "",
+            "=== RkGitlab Commands ===",
+            "  :RkGitlab comment : [When issue preview] Add a comment to the issue",
+            "  :RkGitlab edit    : [When issue list]    Edit issue description",
+            "  :RkGitlab edit    : [When issue preview] Edit 'description' when hover on heading",
+            "  :RkGitlab edit    : [When issue preview] Edit 'comment' when hover on heading",
             "",
             "Press g?, <BS>, or <C-o> to return to the previous view.",
         }
@@ -490,35 +536,61 @@ function M.on_enter()
 end
 
 function M.close_issue()
-    if state.current_view ~= "issue_detail" or not state.selected_project or not state.selected_issue then
+    if
+        state.current_view ~= "issue_detail"
+        or not state.selected_project
+        or not state.selected_issue
+    then
         vim.notify("[RkGitlab] No issue currently open", vim.log.levels.WARN)
         return
     end
 
-    local res = make_request(string.format("/projects/%d/issues/%d", state.selected_project, state.selected_issue), "PUT", { state_event = "close" })
+    local res = make_request(
+        string.format("/projects/%d/issues/%d", state.selected_project, state.selected_issue),
+        "PUT",
+        { state_event = "close" }
+    )
     if res then
-        vim.notify(string.format("[RkGitlab] Issue #%d closed", state.selected_issue), vim.log.levels.INFO)
+        vim.notify(
+            string.format("[RkGitlab] Issue #%d closed", state.selected_issue),
+            vim.log.levels.INFO
+        )
         state.issues[state.selected_project] = nil
         render_issue_detail(state.selected_issue)
     end
 end
 
 function M.open_issue()
-    if state.current_view ~= "issue_detail" or not state.selected_project or not state.selected_issue then
+    if
+        state.current_view ~= "issue_detail"
+        or not state.selected_project
+        or not state.selected_issue
+    then
         vim.notify("[RkGitlab] No issue currently open", vim.log.levels.WARN)
         return
     end
 
-    local res = make_request(string.format("/projects/%d/issues/%d", state.selected_project, state.selected_issue), "PUT", { state_event = "reopen" })
+    local res = make_request(
+        string.format("/projects/%d/issues/%d", state.selected_project, state.selected_issue),
+        "PUT",
+        { state_event = "reopen" }
+    )
     if res then
-        vim.notify(string.format("[RkGitlab] Issue #%d reopened", state.selected_issue), vim.log.levels.INFO)
+        vim.notify(
+            string.format("[RkGitlab] Issue #%d reopened", state.selected_issue),
+            vim.log.levels.INFO
+        )
         state.issues[state.selected_project] = nil
         render_issue_detail(state.selected_issue)
     end
 end
 
 function M.comment_issue()
-    if state.current_view ~= "issue_detail" or not state.selected_project or not state.selected_issue then
+    if
+        state.current_view ~= "issue_detail"
+        or not state.selected_project
+        or not state.selected_issue
+    then
         vim.notify("[RkGitlab] No issue currently open", vim.log.levels.WARN)
         return
     end
@@ -599,8 +671,14 @@ function M.comment_issue()
                     { body = submitted_body }
                 )
                 if res then
-                    vim.notify(string.format("[RkGitlab] Comment added to Issue #%d", issue_iid), vim.log.levels.INFO)
-                    if state.current_view == "issue_detail" and state.selected_issue == issue_iid then
+                    vim.notify(
+                        string.format("[RkGitlab] Comment added to Issue #%d", issue_iid),
+                        vim.log.levels.INFO
+                    )
+                    if
+                        state.current_view == "issue_detail"
+                        and state.selected_issue == issue_iid
+                    then
                         vim.schedule(function()
                             render_issue_detail(issue_iid)
                         end)
@@ -617,7 +695,10 @@ end
 
 function M.add_issue(edit_iid)
     if not state.selected_project then
-        vim.notify("[RkGitlab] Please select a project first to create or edit an issue", vim.log.levels.WARN)
+        vim.notify(
+            "[RkGitlab] Please select a project first to create or edit an issue",
+            vim.log.levels.WARN
+        )
         return
     end
 
@@ -635,13 +716,37 @@ function M.add_issue(edit_iid)
     end
 
     if is_edit then
-        pcall(vim.api.nvim_buf_set_name, buf_title, string.format("gitlab_issue_title_%d_%d.md", project_id, edit_iid))
-        pcall(vim.api.nvim_buf_set_name, buf_desc, string.format("gitlab_issue_desc_%d_%d.md", project_id, edit_iid))
-        pcall(vim.api.nvim_buf_set_name, buf_flags, string.format("gitlab_issue_flags_%d_%d.md", project_id, edit_iid))
+        pcall(
+            vim.api.nvim_buf_set_name,
+            buf_title,
+            string.format("gitlab_issue_title_%d_%d.md", project_id, edit_iid)
+        )
+        pcall(
+            vim.api.nvim_buf_set_name,
+            buf_desc,
+            string.format("gitlab_issue_desc_%d_%d.md", project_id, edit_iid)
+        )
+        pcall(
+            vim.api.nvim_buf_set_name,
+            buf_flags,
+            string.format("gitlab_issue_flags_%d_%d.md", project_id, edit_iid)
+        )
     else
-        pcall(vim.api.nvim_buf_set_name, buf_title, string.format("gitlab_issue_title_%d.md", project_id))
-        pcall(vim.api.nvim_buf_set_name, buf_desc, string.format("gitlab_issue_desc_%d.md", project_id))
-        pcall(vim.api.nvim_buf_set_name, buf_flags, string.format("gitlab_issue_flags_%d.md", project_id))
+        pcall(
+            vim.api.nvim_buf_set_name,
+            buf_title,
+            string.format("gitlab_issue_title_%d.md", project_id)
+        )
+        pcall(
+            vim.api.nvim_buf_set_name,
+            buf_desc,
+            string.format("gitlab_issue_desc_%d.md", project_id)
+        )
+        pcall(
+            vim.api.nvim_buf_set_name,
+            buf_flags,
+            string.format("gitlab_issue_flags_%d.md", project_id)
+        )
     end
 
     vim.api.nvim_buf_set_lines(buf_title, 0, -1, false, { "" })
@@ -725,7 +830,9 @@ function M.add_issue(edit_iid)
 
     local function center_text(text, width)
         local padding = width - #text
-        if padding <= 0 then return text end
+        if padding <= 0 then
+            return text
+        end
         local left = math.floor(padding / 2)
         local right = padding - left
         return string.rep(" ", left) .. text .. string.rep(" ", right)
@@ -793,14 +900,22 @@ function M.add_issue(edit_iid)
             vim.notify("[RkGitlab] Issue saved. Exit any buffer to submit.", vim.log.levels.INFO)
         end
 
-        pcall(function() vim.bo[buf_title].modified = false end)
-        pcall(function() vim.bo[buf_desc].modified = false end)
-        pcall(function() vim.bo[buf_flags].modified = false end)
+        pcall(function()
+            vim.bo[buf_title].modified = false
+        end)
+        pcall(function()
+            vim.bo[buf_desc].modified = false
+        end)
+        pcall(function()
+            vim.bo[buf_flags].modified = false
+        end)
     end
 
     local is_submitting = false
     local function close_action()
-        if is_submitting then return end
+        if is_submitting then
+            return
+        end
         is_submitting = true
 
         for _, w in ipairs({ win_title, win_desc, win_flags, win_confirm, win_cancel }) do
@@ -812,14 +927,25 @@ function M.add_issue(edit_iid)
         if submitted_data and submitted_data.title ~= "" then
             local res = nil
             if is_edit then
-                res = make_request(string.format("/projects/%d/issues/%d", project_id, edit_iid), "PUT", submitted_data)
+                res = make_request(
+                    string.format("/projects/%d/issues/%d", project_id, edit_iid),
+                    "PUT",
+                    submitted_data
+                )
             else
-                res = make_request(string.format("/projects/%d/issues", project_id), "POST", submitted_data)
+                res = make_request(
+                    string.format("/projects/%d/issues", project_id),
+                    "POST",
+                    submitted_data
+                )
             end
 
             if res then
                 local action_str = is_edit and "updated" or "created"
-                vim.notify(string.format("[RkGitlab] Issue '%s' %s", submitted_data.title, action_str), vim.log.levels.INFO)
+                vim.notify(
+                    string.format("[RkGitlab] Issue '%s' %s", submitted_data.title, action_str),
+                    vim.log.levels.INFO
+                )
                 state.issues[project_id] = nil
                 if state.current_view == "issues" or state.current_view == "projects" then
                     vim.schedule(function()
