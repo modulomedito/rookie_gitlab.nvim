@@ -17,6 +17,7 @@ local function new_state(cwd)
         forward_view = nil,
         selected_project = nil,
         selected_issue = nil,
+        detail_notes = {},
         filter_text = "",
         quick_filter_active = false,
         quick_filter_pattern = "",
@@ -297,6 +298,7 @@ render_issue_detail = function(issue_iid)
 
         local notes =
             make_request(string.format("/projects/%d/issues/%d/notes", project_id, issue_iid))
+        state.detail_notes = notes or {}
 
         local lines = {}
         table.insert(lines, "# " .. issue.title)
@@ -504,10 +506,13 @@ function M.toggle_help()
             "  g?         : Toggle this help menu",
             "",
             "=== RkGitlab Commands ===",
-            "  :RkGitlab comment : [When issue preview] Add a comment to the issue",
-            "  :RkGitlab edit    : [When issue list]    Edit issue description",
-            "  :RkGitlab edit    : [When issue preview] Edit 'description' when hover on heading",
-            "  :RkGitlab edit    : [When issue preview] Edit 'comment' when hover on heading",
+            "  :RkGitlab open    : [When issue list]   Switch the issue state as 'open'",
+            "  :RkGitlab close   : [When issue list]   Switch the issue state as 'close'",
+            "  :RkGitlab toggle  : [When issue list]   Toggle the issue state",
+            "  :RkGitlab comment : [When issue detail] Add a comment to the issue",
+            "  :RkGitlab edit    : [When issue list]   Edit issue description",
+            "  :RkGitlab edit    : [When issue detail] Edit 'description' when hover on heading",
+            "  :RkGitlab edit    : [When issue detail] Edit 'comment' when hover on heading",
             "",
             "Press g?, <BS>, or <C-o> to return to the previous view.",
         }
@@ -1002,21 +1007,238 @@ function M.add_issue(edit_iid)
     end
 end
 
-function M.edit_issue()
-    if state.current_view ~= "issues" then
-        vim.notify("[RkGitlab] Please edit an issue from the issues view", vim.log.levels.WARN)
+-- Open a floating buffer to rewrite `body`. `s` stages a submit, `q` or
+-- `ZZ` submits (or aborts when empty/unchanged). Keeps `:w` working too.
+local function edit_body_flow(orig_body, title, submit)
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[buf].buftype = "acwrite"
+    vim.bo[buf].filetype = "markdown"
+    vim.bo[buf].bufhidden = "wipe"
+
+    pcall(vim.api.nvim_buf_set_name, buf, "gitlab_edit_body_" .. buf .. ".md")
+
+    local original = orig_body:gsub("%s+$", "")
+    local prefill = vim.split(original, "\n", true)
+    if #prefill == 1 and prefill[1] == "" then
+        prefill = { "" }
+    end
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, prefill)
+
+    local submitted_body = nil
+
+    local function stage_from_buffer(announce)
+        local body = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+        body = body:gsub("^%s+", ""):gsub("%s+$", "")
+
+        if body == "" or body == original then
+            submitted_body = nil
+            vim.notify("[RkGitlab] Edit unchanged or empty.", vim.log.levels.WARN)
+        else
+            submitted_body = body
+            if announce then
+                vim.notify("[RkGitlab] Edit saved. Press q to submit.", vim.log.levels.INFO)
+            end
+        end
+        vim.bo[buf].modified = false
+    end
+
+    vim.api.nvim_create_autocmd("BufWriteCmd", {
+        buffer = buf,
+        callback = function()
+            stage_from_buffer(true)
+        end,
+    })
+
+    -- BufDelete (user quits buffer directly, e.g. `:bdelete`) still submits
+    vim.api.nvim_create_autocmd("BufDelete", {
+        buffer = buf,
+        callback = function()
+            if submitted_body and submitted_body ~= "" then
+                submit(submitted_body)
+            end
+        end,
+    })
+
+    local width = math.floor(vim.o.columns * 0.6)
+    local height = math.floor(vim.o.lines * 0.6)
+    local col = math.floor((vim.o.columns - width) / 2)
+    local row = math.floor((vim.o.lines - height) / 2)
+
+    local win = vim.api.nvim_open_win(buf, true, {
+        relative = "editor",
+        width = width,
+        height = height,
+        col = col,
+        row = row,
+        style = "minimal",
+        border = "rounded",
+        title = title,
+        title_pos = "center",
+    })
+
+    vim.api.nvim_buf_set_keymap(buf, "n", "s", "", {
+        noremap = true,
+        silent = true,
+        callback = function()
+            stage_from_buffer(true)
+        end,
+    })
+
+    local function close_submit()
+        if not vim.api.nvim_win_is_valid(win) then
+            return
+        end
+
+        stage_from_buffer(false)
+
+        local body = submitted_body
+        submitted_body = nil
+        pcall(vim.api.nvim_win_close, win, true) -- wipe fires BufDelete; nothing staged
+
+        if body then
+            submit(body)
+        else
+            vim.notify("[RkGitlab] Edit aborted.", vim.log.levels.INFO)
+        end
+    end
+
+    vim.api.nvim_buf_set_keymap(buf, "n", "q", "", {
+        noremap = true,
+        silent = true,
+        callback = close_submit,
+    })
+
+    vim.api.nvim_buf_set_keymap(buf, "n", "ZZ", "", {
+        noremap = true,
+        silent = true,
+        callback = close_submit,
+    })
+
+    -- `:w`-based submit (BufWriteCmd stages, then buffer wipe submits)
+    vim.api.nvim_buf_set_keymap(buf, "n", "<C-s>", "", {
+        noremap = true,
+        silent = true,
+        callback = function()
+            vim.api.nvim_buf_call(buf, function()
+                vim.cmd("write")
+            end)
+        end,
+    })
+
+    vim.api.nvim_win_set_cursor(win, { 1, 0 })
+end
+
+-- Rendered detail view stores notes in state so comment headings
+-- (`### author (created_at)`) can be mapped back to note ids for editing.
+function M.edit_issue_detail()
+    if state.current_view ~= "issue_detail" then
+        vim.notify("[RkGitlab] Edit is available in the issue detail view", vim.log.levels.WARN)
         return
     end
 
     local line = vim.api.nvim_get_current_line()
-    local iid_str = line:match("^#(%d+)")
+    local project_id = state.selected_project
+    local issue_iid = state.selected_issue
 
-    if not iid_str then
-        vim.notify("[RkGitlab] No issue found under cursor", vim.log.levels.WARN)
+    local description_str = line:match("^## Description")
+    local comment_author, comment_time = line:match("^### (.+) %((%d+-%d+-%d+T%d+:%d+:%d+%.%d+Z)%)")
+
+    if description_str then
+        -- Modify the issue description
+        local issue = make_request(string.format("/projects/%d/issues/%d", project_id, issue_iid))
+        if not issue then
+            return
+        end
+
+        local orig_body = issue.description or ""
+        local title =
+            string.format(" Issue #%d description (:w save, close window to submit) ", issue_iid)
+        edit_body_flow(orig_body, title, function(new_body)
+            local res = make_request(
+                string.format("/projects/%d/issues/%d", project_id, issue_iid),
+                "PUT",
+                { description = new_body }
+            )
+            if res then
+                vim.notify("[RkGitlab] Issue description updated", vim.log.levels.INFO)
+                state.issues[project_id] = nil
+                state.detail_notes = {}
+                vim.schedule(function()
+                    render_issue_detail(issue_iid)
+                end)
+            else
+                vim.notify("[RkGitlab] Failed to update issue description", vim.log.levels.ERROR)
+            end
+        end)
+    elseif comment_author and comment_time then
+        -- Modify the comment whose heading is under the cursor
+        local matched = nil
+        for _, note in ipairs(state.detail_notes) do
+            if
+                note.author
+                and note.author.name == comment_author
+                and note.created_at == comment_time
+            then
+                matched = note
+                break
+            end
+        end
+        if not matched then
+            vim.notify(
+                "[RkGitlab] Comment not found, refresh the view and retry",
+                vim.log.levels.WARN
+            )
+            return
+        end
+
+        local orig_body = matched.body or ""
+        local title =
+            string.format(" Comment by %s (:w save, close window to submit) ", comment_author)
+        edit_body_flow(orig_body, title, function(new_body)
+            local res = make_request(
+                string.format("/projects/%d/issues/%d/notes/%d", project_id, issue_iid, matched.id),
+                "PUT",
+                { body = new_body }
+            )
+            if res then
+                vim.notify("[RkGitlab] Comment updated", vim.log.levels.INFO)
+                state.detail_notes = {}
+                vim.schedule(function()
+                    render_issue_detail(issue_iid)
+                end)
+            else
+                vim.notify("[RkGitlab] Failed to update comment", vim.log.levels.ERROR)
+            end
+        end)
+    else
+        vim.notify(
+            "[RkGitlab] Please place 'description' or 'comment' heading under cursor",
+            vim.log.levels.WARN
+        )
         return
     end
+end
 
-    M.add_issue(tonumber(iid_str))
+function M.edit_issue()
+    if state.current_view == "issues" then
+        local line = vim.api.nvim_get_current_line()
+        local iid_str = line:match("^#(%d+)")
+
+        if not iid_str then
+            vim.notify("[RkGitlab] No issue found under cursor", vim.log.levels.WARN)
+            return
+        end
+
+        M.add_issue(tonumber(iid_str))
+    elseif state.current_view == "issue_detail" then
+        M.edit_issue_detail()
+    else
+        vim.notify(
+            "[RkGitlab] Please edit an issue from the 'issues' view or the 'issue detail' view",
+            vim.log.levels.WARN
+        )
+        return
+    end
 end
 
 function M.setup()
