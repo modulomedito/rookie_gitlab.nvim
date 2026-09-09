@@ -352,10 +352,7 @@ render_issue_detail = function(issue_iid)
         -- level deeper. Capped at `######`. Falls back to the flat `###`
         -- list when the discussions call fails.
         local function render_comment(note, heading)
-            table.insert(
-                lines,
-                heading .. note.author.name .. " (" .. note.created_at .. ")"
-            )
+            table.insert(lines, heading .. note.author.name .. " (" .. note.created_at .. ")")
             for s in note.body:gmatch("[^\r\n]+") do
                 table.insert(lines, s)
             end
@@ -376,11 +373,7 @@ render_issue_detail = function(issue_iid)
             table.insert(lines, "*No comments.*")
         else
             local discussions = make_request(
-                string.format(
-                    "/projects/%d/issues/%d/discussions",
-                    project_id,
-                    issue_iid
-                )
+                string.format("/projects/%d/issues/%d/discussions", project_id, issue_iid)
             )
             if type(discussions) == "table" and #discussions > 0 then
                 for _, discussion in ipairs(discussions) do
@@ -394,10 +387,7 @@ render_issue_detail = function(issue_iid)
                                 end
                                 is_root = false
                                 comments = comments + 1
-                                render_comment(
-                                    note,
-                                    string.rep("#", math.min(depth, 6)) .. " "
-                                )
+                                render_comment(note, string.rep("#", math.min(depth, 6)) .. " ")
                             end
                         end
                     end
@@ -655,18 +645,13 @@ end
 -- the cursor to the note it was rendered from. Returns the note plus the
 -- parsed values, or just the parsed values when the note is stale.
 local function find_heading_note(line)
-    local author, created_at =
-        line:match("^#{3,6} (.+) %((%d+-%d+-%d+T%d+:%d+:%d+%.%d+Z)%)")
+    local author, created_at = line:match("^#{3,6} (.+) %((%d+-%d+-%d+T%d+:%d+:%d+%.%d+Z)%)")
     if not author then
         return nil
     end
 
     for _, note in ipairs(state.detail_notes) do
-        if
-            note.author
-            and note.author.name == author
-            and note.created_at == created_at
-        then
+        if note.author and note.author.name == author and note.created_at == created_at then
             return note, author, created_at
         end
     end
@@ -702,13 +687,8 @@ function M.comment_issue()
             return
         end
 
-        local discussions = make_request(
-            string.format(
-                "/projects/%d/issues/%d/discussions",
-                project_id,
-                issue_iid
-            )
-        )
+        local discussions =
+            make_request(string.format("/projects/%d/issues/%d/discussions", project_id, issue_iid))
         local discussion_id = nil
         if type(discussions) == "table" then
             for _, discussion in ipairs(discussions) do
@@ -919,7 +899,8 @@ function M.add_issue(edit_iid)
     vim.api.nvim_buf_set_lines(buf_desc, 0, -1, false, { "", "<!-- Issue Description -->" })
     vim.api.nvim_buf_set_lines(buf_flags, 0, -1, false, {
         "",
-        "<!-- /assign @user, /reassign, /label bug, see https://docs.gitlab.com/user/project/quick_actions/ -->",
+        "<!-- /assign @user, /reassign, /label bug, one slash command per line -->",
+        "<!-- See https://docs.gitlab.com/user/project/quick_actions/ -->",
     })
 
     if is_edit then
@@ -1340,10 +1321,7 @@ function M.edit_issue_detail()
             end
         end)
     elseif comment_author then
-        vim.notify(
-            "[RkGitlab] Comment not found, refresh the view and retry",
-            vim.log.levels.WARN
-        )
+        vim.notify("[RkGitlab] Comment not found, refresh the view and retry", vim.log.levels.WARN)
         return
     else
         vim.notify(
