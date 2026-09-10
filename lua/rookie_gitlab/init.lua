@@ -645,7 +645,7 @@ end
 -- the cursor to the note it was rendered from. Returns the note plus the
 -- parsed values, or just the parsed values when the note is stale.
 local function find_heading_note(line)
-    local author, created_at = line:match("^#{3,6} (.+) %((%d+-%d+-%d+T%d+:%d+:%d+%.%d+Z)%)")
+    local author, created_at = line:match("^###+ (.+) %((%d+-%d+-%d+T%d+:%d+:%d+%.%d+Z)%)")
     if not author then
         return nil
     end
